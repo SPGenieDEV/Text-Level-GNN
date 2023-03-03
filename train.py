@@ -1,3 +1,5 @@
+# Import Libraries
+
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -5,8 +7,10 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader, random_split
 import numpy as np
 from time import time
-import argparse
+import joblib
+import matplotlib.pyplot as plt
 
+# Define Glove Tokenizer
 
 class GloveTokenizer:
     def __init__(self, filename, unk='<unk>', pad='<pad>'):
@@ -60,7 +64,8 @@ class GloveTokenizer:
     def embedding(self, encoded_sentence):
         return self.embedding_matrix[np.array(encoded_sentence)]
 
-
+# Define GNN Dataset CORE    
+    
 class TextLevelGNNDataset(Dataset): # For instantiating train, validation and test dataset
     def __init__(self, node_sets, neighbor_sets, public_edge_mask, labels):
         super(TextLevelGNNDataset).__init__()
@@ -78,7 +83,8 @@ class TextLevelGNNDataset(Dataset): # For instantiating train, validation and te
     def __len__(self):
         return len(self.labels)
 
-
+# Define nodes,edges,neighbors,labels by preparing dataset to make graph (Train)
+    
 class TextLevelGNNDatasetClass: # This class is used to achieve parameters sharing among datasets
     def __init__(self, train_filename, test_filename, tokenizer, MAX_LENGTH=10, p=2, min_freq=2, train_validation_split=0.8):
         self.train_filename = train_filename
@@ -117,7 +123,7 @@ class TextLevelGNNDatasetClass: # This class is used to achieve parameters shari
                 self.itos[self.vocab_count] = vocab
                 self.vocab_count += 1
         self.embedding_matrix = self.tokenizer.embedding(self.tokenizer.encode(list(self.stoi.keys())))
-
+        
     def prepare_dataset(self): # will also build self.edge_stat and self.public_edge_mask
         # preparing self.train_dataset
         node_sets = [[self.stoi.get(vocab, 0) for vocab in sentence.strip().split(' ')][:self.MAX_LENGTH] for _, sentence in self.train_dataset] # Only retrieve the first MAX_LENGTH words in each document
@@ -142,7 +148,7 @@ class TextLevelGNNDatasetClass: # This class is used to achieve parameters shari
         test_dataset = TextLevelGNNDataset(node_sets, neighbor_sets, public_edge_mask, labels)
 
         return train_dataset, validation_dataset, test_dataset, edge_stat, public_edge_mask
-
+    
     def build_public_edge_mask(self, node_sets, neighbor_sets, min_freq=2):
         edge_stat = torch.zeros(self.vocab_count, self.vocab_count)
         for node_set, neighbor_set in zip(node_sets, neighbor_sets):
@@ -153,70 +159,7 @@ class TextLevelGNNDatasetClass: # This class is used to achieve parameters shari
         return edge_stat, public_edge_mask
 
 
-# this is the class for input text that we need to predict
-class TextLevelGNNXClass:  # This class is used to achieve parameters sharing final input text
-    def __init__(self, test_filename, tokenizer, MAX_LENGTH=10, p=2, min_freq=2):
-        self.test_filename = test_filename
-        self.tokenizer = tokenizer
-        self.MAX_LENGTH = MAX_LENGTH
-        self.p = p
-        self.min_freq = min_freq
-
-        self.test_data = pd.read_csv(self.test_filename, sep='\t', header=None)
-
-        self.stoi = {'<unk>': 0, '<pad>': 1}  # Re-index
-        self.itos = {0: '<unk>', 1: '<pad>'}  # Re-index
-        self.vocab_count = len(self.stoi)
-        self.embedding_matrix = None
-        self.label_dict = dict(
-            zip(self.train_data[0].unique(), pd.get_dummies(self.train_data[0].unique()).values.tolist()))
-
-        self.test_dataset = self.test_data.to_numpy()
-
-        #self.build_vocab()  # Based on train_dataset only. Updates self.stoi, self.itos, self.vocab_count and self.embedding_matrix
-
-        self.test_dataset, self.edge_stat, self.public_edge_mask = self.prepare_dataset()
-
-    def build_vocab(self):
-        vocab_list = [sentence.split(' ') for _, sentence in self.train_dataset]
-        unique_vocab = []
-        for vocab in vocab_list:
-            unique_vocab.extend(vocab)
-        unique_vocab = list(set(unique_vocab))
-        for vocab in unique_vocab:
-            if vocab in self.tokenizer.stoi.keys():
-                self.stoi[vocab] = self.vocab_count
-                self.itos[self.vocab_count] = vocab
-                self.vocab_count += 1
-        self.embedding_matrix = self.tokenizer.embedding(self.tokenizer.encode(list(self.stoi.keys())))
-
-    def prepare_dataset(self):  # will also build self.edge_stat and self.public_edge_mask
-        # preparing self.train_dataset
-
-        # Construct edge statistics and public edge mask
-        edge_stat, public_edge_mask = self.build_public_edge_mask(node_sets, neighbor_sets, min_freq=self.min_freq)
-
-
-        # preparing self.validation_dataset
-
-        # preparing self.test_dataset
-        node_sets = [[self.stoi.get(vocab, 0) for vocab in sentence.strip().split(' ')][:self.MAX_LENGTH] for
-                     _, sentence in self.test_dataset]  # Only retrieve the first MAX_LENGTH words in each document
-        neighbor_sets = [create_neighbor_set(node_set, p=self.p) for node_set in node_sets]
-        labels = [self.label_dict[label] for label, _ in self.test_dataset]
-        test_dataset = TextLevelGNNDataset(node_sets, neighbor_sets, public_edge_mask, labels)
-
-        return test_dataset, edge_stat, public_edge_mask
-
-    def build_public_edge_mask(self, node_sets, neighbor_sets, min_freq=2):
-        edge_stat = torch.zeros(self.vocab_count, self.vocab_count)
-        for node_set, neighbor_set in zip(node_sets, neighbor_sets):
-            for neighbor in neighbor_set:
-                for to_node in neighbor:
-                    edge_stat[node_set, to_node] += 1
-        public_edge_mask = edge_stat < min_freq  # mark True at uncommon edges
-        return edge_stat, public_edge_mask
-
+# Define create neighbor set
 
 def create_neighbor_set(node_set, p=2):
     if type(node_set[0]) != int:
@@ -233,6 +176,7 @@ def create_neighbor_set(node_set, p=2):
         neighbor_set.append(neighbor)
     return neighbor_set
 
+# Define padding sequence
 
 def pad_custom_sequence(sequences):
     '''
@@ -262,6 +206,7 @@ def pad_custom_sequence(sequences):
     label_sequence = torch.nn.utils.rnn.pad_sequence(label_sequence, batch_first=True, padding_value=1)
     return node_sets_sequence, neighbor_sets_sequence, public_edge_mask_sequence, label_sequence
 
+#Define padding tensor
 
 def padding_tensor(sequences, padding_idx=1):
     '''
@@ -285,6 +230,7 @@ def padding_tensor(sequences, padding_idx=1):
     mask = out_tensor == padding_idx # Marking all places with padding_idx as mask
     return out_tensor, mask
 
+# Define MassagePassing
 
 class MessagePassing(nn.Module):
     def __init__(self, vertice_count, input_size, out_size, dropout_rate=0, padding_idx=1):
@@ -317,6 +263,7 @@ class MessagePassing(nn.Module):
         y = F.softmax(x, dim=1) # (batch_size, c) along the c dimension
         return y
 
+# Define Graph Neural Network
 
 class TextLevelGNN(nn.Module):
     def __init__(self, pretrained_embeddings, out_size=12, dropout_rate=0, padding_idx=1):
@@ -347,75 +294,47 @@ class TextLevelGNN(nn.Module):
         return x
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--cuda', default='0', type=str, required=False,
-                    help='Choosing which cuda to use')
-parser.add_argument('--embedding_size', default=50, type=int, required=False,
-                    help='Number of hidden units in each layer of the graph embedding part')
-parser.add_argument('--p', default=3, type=int, required=False,
-                    help='The window size')
-parser.add_argument('--min_freq', default=2, type=int, required=False,
-                    help='The minimum no. of occurrence for a word to be considered as a meaningful word. Words with less than this occurrence will be mapped to a globally shared embedding weight (to the <unk> token). It corresponds to the parameter k in the original paper.')
-parser.add_argument('--max_length', default=70, type=int, required=False,
-                    help='The max length of each document to be processed')
-parser.add_argument('--dropout', default=0, type=float, required=False,
-                    help='Dropout rate')
-parser.add_argument('--lr', default=1e-3, type=float, required=False,
-                    help='Initial learning rate')
-parser.add_argument('--lr_decay_factor', default=0.9, type=float, required=False,
-                    help='Multiplicative factor of learning rate decays')
-parser.add_argument('--lr_decay_every', default=5, type=int, required=False,
-                    help='Decaying learning rate every ? epochs')
-parser.add_argument('--weight_decay', default=1e-4, type=float, required=False,
-                    help='Weight decay (L2 penalty)')
-parser.add_argument('--warm_up_epoch', default=0, type=int, required=False,
-                    help='Pretraining for ? epochs before early stopping to be in effect')
-parser.add_argument('--early_stopping_patience', default=10, type=int, required=False,
-                    help='Waiting for ? more epochs after the best epoch to see any further improvements')
-parser.add_argument('--early_stopping_criteria', default='loss', type=str, required=False,
-                    choices=['accuracy', 'loss'],
-                    help='Early stopping according to validation accuracy or validation loss')
-parser.add_argument("--epoch", default=3, type=int, required=False,
-                    help='Number of epochs to train')
-args = parser.parse_args()
+# Load GloveTokenizer
 
-tokenizer = GloveTokenizer(f'embeddings/glove.6B.{args.embedding_size}d.txt')
-dataset = TextLevelGNNDatasetClass(train_filename='test.txt',
-                                   test_filename='test.txt',
-                                   train_validation_split=0.5,
+tokenizer = GloveTokenizer(f'embeddings/glove.6B.50d.txt')
+
+# Retreive Datasets
+
+dataset = TextLevelGNNDatasetClass(train_filename='train-data.txt',
+                                   test_filename='train-data.txt',
+                                   train_validation_split=0.8,
                                    tokenizer=tokenizer,
-                                   p=args.p,
-                                   min_freq=args.min_freq,
-                                   MAX_LENGTH=args.max_length)
+                                   p=3,
+                                   min_freq=2,
+                                   MAX_LENGTH=70)
 
 
-dataset_input = TextLevelGNNXClass(
-                                   test_filename='test.txt',
-                                   tokenizer=tokenizer,
-                                   p=args.p,
-                                   min_freq=args.min_freq,
-                                   MAX_LENGTH=args.max_length)
-
+# Load Datasets from DataLoader
 
 train_loader = DataLoader(dataset.train_dataset, batch_size=32, shuffle=True, collate_fn=pad_custom_sequence)
 validation_loader = DataLoader(dataset.validation_dataset, batch_size=32, shuffle=True, collate_fn=pad_custom_sequence)
 test_loader = DataLoader(dataset.test_dataset, batch_size=32, shuffle=True, collate_fn=pad_custom_sequence)
 
-input_text_loader = DataLoader(dataset_input.test_dataset, batch_size=32, shuffle=True, collate_fn=pad_custom_sequence)
 
-device = torch.device(f'cuda:{args.cuda}') if torch.cuda.is_available() else torch.device('cpu')
-model = TextLevelGNN(pretrained_embeddings=torch.tensor(dataset.embedding_matrix), dropout_rate=args.dropout).to(device)
+# Create Model
+
+device = torch.device(f'cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+model = TextLevelGNN(pretrained_embeddings=torch.tensor(dataset.embedding_matrix), dropout_rate=0).to(device)
 criterion = nn.BCELoss()
 
-lr = args.lr
-lr_decay_factor = args.lr_decay_factor
-lr_decay_every = args.lr_decay_every
-weight_decay = args.weight_decay
+# Define optimize parameters
 
-warm_up_epoch = args.warm_up_epoch
-early_stopping_patience = args.early_stopping_patience
-early_stopping_criteria = args.early_stopping_criteria
+lr = 1e-3
+lr_decay_factor = 0.9
+lr_decay_every = 5
+weight_decay = 1e-4
+
+warm_up_epoch = 0
+early_stopping_patience = 10
+early_stopping_criteria = 'loss'
 best_epoch = 0 # Initialize
+
+# Define output lists and arrays
 
 training = {}
 validation = {}
@@ -427,7 +346,10 @@ validation['loss'] = []
 testing['accuracy'] = []
 testing['loss'] = []
 
-for epoch in range(args.epoch):
+# Training iteration start!
+
+for epoch in range(1):
+    # Train model
     model.train()
     train_loss = 0
     train_correct_items = 0
@@ -456,6 +378,7 @@ for epoch in range(args.epoch):
         train_correct_items += (prediction.argmax(dim=1) == labels.argmax(dim=1)).sum().item()
     train_accuracy = train_correct_items / len(dataset.train_dataset)
 
+    # Validate model
     model.eval()
     validation_loss = 0
     validation_correct_items = 0
@@ -470,7 +393,8 @@ for epoch in range(args.epoch):
         validation_correct_items += (prediction.argmax(dim=1) == labels.argmax(dim=1)).sum().item()
     validation_accuracy = validation_correct_items / len(dataset.validation_dataset)
 
-#     model.eval()
+    # Test model
+    # model.eval()
     test_loss = 0
     test_correct_items = 0
     for i, (node_sets, neighbor_sets, public_edge_masks, labels) in enumerate(test_loader):
@@ -483,6 +407,9 @@ for epoch in range(args.epoch):
         test_loss += loss.item()
         test_correct_items += (prediction.argmax(dim=1) == labels.argmax(dim=1)).sum().item()
     test_accuracy = test_correct_items / len(dataset.test_dataset)
+    
+    # Retrieve output data
+    
     print(f'Epoch: {epoch+1}, Training Loss: {train_loss:.4f}, Validation Loss: {validation_loss:.4f}, Testing Loss: {test_loss:.4f}, Training Accuracy: {train_accuracy:.4f}, Validation Accuracy: {validation_accuracy:.4f}, Testing Accuracy: {test_accuracy:.4f}, Time Used: {time()-previous_epoch_timestamp:.2f}s')
     training['accuracy'].append(train_accuracy)
     training['loss'].append(train_loss)
@@ -491,7 +418,7 @@ for epoch in range(args.epoch):
     testing['accuracy'].append(test_accuracy)
     testing['loss'].append(test_loss)
 
-    # add warmup mechanism for warm_up_epoch epochs
+    # Add warmup mechanism for warm_up_epoch epochs
     if epoch >= warm_up_epoch:
         best_epoch = warm_up_epoch
         # early stopping
@@ -509,12 +436,21 @@ for epoch in range(args.epoch):
                 break
     elif epoch + 1 == warm_up_epoch:
         print('--- Warm up finished ---')
+        
+# Training end!
+
+
+# Pickle the model
+
+joblib.dump(model, "GNN-model.pkl")        
+        
+ 
+# Visualize output as charts
 
 df = pd.concat([pd.DataFrame(training), pd.DataFrame(validation), pd.DataFrame(testing)], axis=1)
 df.columns = ['Training Accuracy', 'Training Loss', 'Validation Accuracy', 'Validation Loss', 'Testing Accuracy', 'Testing Loss']
 #df.to_csv(f'embedding_size={args.embedding_size},p={args.p},min_freq={args.min_freq},max_length={args.max_length},dropout={args.dropout},lr={args.lr},lr_decay_factor={args.lr_decay_factor},lr_decay_every={args.lr_decay_every},weight_decay={args.weight_decay},warm_up_epoch={args.warm_up_epoch},early_stopping_patience={args.early_stopping_patience},early_stopping_criteria={args.early_stopping_criteria},epoch={args.epoch}.csv') # Logging
 
-import matplotlib.pyplot as plt
 
 plt.plot(training['loss'], label='Training Loss')
 plt.plot(validation['loss'], label='Validation Loss')
