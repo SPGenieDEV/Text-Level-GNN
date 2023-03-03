@@ -63,7 +63,7 @@ class GloveTokenizer:
     def embedding(self, encoded_sentence):
         return self.embedding_matrix[np.array(encoded_sentence)]
 
-# Define GNN dataset CORE
+# Define GNN Dataset CORE
 
 class TextLevelGNNDataset(Dataset): # For instantiating train, validation and test dataset
     def __init__(self, node_sets, neighbor_sets, public_edge_mask, labels):
@@ -82,7 +82,7 @@ class TextLevelGNNDataset(Dataset): # For instantiating train, validation and te
     def __len__(self):
         return len(self.labels)
       
-# This is the class for input text that we need to predict
+# Define nodes,edges,neighbors,labels by preparing dataset to make graph (Input Text)
 
 class TextLevelGNNXClass:  # This class is used to achieve parameters sharing final input text
     def __init__(self, test_filename, tokenizer, MAX_LENGTH=10, p=2, min_freq=2):
@@ -284,7 +284,7 @@ class TextLevelGNN(nn.Module):
 
 tokenizer = GloveTokenizer(f'embeddings/glove.6B.50d.txt')
 
-# Load input data
+# Load input data as a dataset
 
 dataset_input = TextLevelGNNXClass(
                                    test_filename='test-data.txt', # <---- here we need to feed inserted user story
